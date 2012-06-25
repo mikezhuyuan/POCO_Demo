@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<root version="1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://code.ef.com/devwiki/GeneratorSchemas/simple.1.0.xsd">
+  <so name="AssignmentInfo" readonly="1">
+    <properties>
+      <property name="Assignment_id" type="int" />
+      <property name="AssignmentTypeCode" type="char(2)" />
+      <property name="Course_id" type="int" nullable="1" />
+      <property name="ParentAssignment_id" type="int" nullable="1" />
+      <property name="Number" type="tinyint(1)" nullable="1" />
+      <property name="Title" type="varchar(50)" />
+      <property name="Description" type="varchar(500)" nullable="1" />
+      <property name="EstimatedMins" type="smallint(2)" nullable="1" />
+      <property name="IsDeleted" type="bit(1)" />
+      <property name="InsertDate" type="smalldatetime" />
+      <property name="UpdateDate" type="smalldatetime" />
+      <property name="IsLevelTest" type="bit(1)" />
+      <property name="LevelCode" type="varchar(3)" nullable="1" />
+      <property name="Source_id" type="int" nullable="1" />
+    </properties>
+    <options>
+      <assembler spew="1" />
+    </options>
+  </so>
+</root>
