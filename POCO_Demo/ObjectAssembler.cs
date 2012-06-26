@@ -12,12 +12,12 @@ namespace POCO_Demo
     /// <summary>
     /// Map datareader to object. IL code auto emits on demand.
     /// </summary>    
-    internal static class ObjectAssembler<T> where T : class
+    internal static class ObjectAssembler<T>
     {        
         public static T Create(SqlDataReader dr)
         {
             if (dr.Read())
-                return _assemble(dr);
+                return _assembler(dr);
 
             return default(T);
         }
@@ -37,7 +37,7 @@ namespace POCO_Demo
 
             while (dr.Read())
             {
-                var itm = _assemble(dr);
+                var itm = _assembler(dr);
                 lst.Add(itm);
             }
 
@@ -53,43 +53,26 @@ namespace POCO_Demo
             }
         }
 
-        private static readonly Func<SqlDataReader, T> _assemble;
+        private static readonly Func<SqlDataReader, T> _assembler;
 
         //magic happens here
         static ObjectAssembler()
         {
-            if (typeof(T).IsPrimitive)
+            var type = typeof(T);
+            if (type.IsPrimitive)
             {
-                _assemble = _ => (T)_[0];
-                return;
+                _assembler = ObjectAssemblerHelper.CreateScalarAssembler<T>();
             }
-
-            var props = typeof(T).GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.SetProperty);
-
-            var dr = Expression.Parameter(typeof(SqlDataReader), "dr");
-            var itm = Expression.Parameter(typeof(T), "itm");
-
-            Expression body = Expression.Block(
-                                    new[] { itm },
-                                    Expression.Assign(itm, Expression.New(typeof(T)))
-                                    .Union(props.Where(_ => _.CanWrite && !_.GetSetMethod(true).IsPrivate)
-                                                .Select((prop, index) =>
-                                                {
-                                                    var name = prop.Name;
-                                                    var ptype = prop.PropertyType;
-
-                                                    var method = ObjectAssemblerHelper.GetMethod(ptype);
-
-                                                    return Expression.Assign(
-                                                        Expression.Property(itm, name),
-                                                        Expression.Call(null, method, dr,
-                                                                        Expression.Constant(name)));
-                                                }))
-                                    .Union(itm));
-
-            _assemble = Expression.Lambda<Func<SqlDataReader, T>>(body, new[] { dr }).Compile();
+            else if (type.IsGenericType && type.Name.StartsWith("Tuple`"))
+            {
+                _assembler = ObjectAssemblerHelper.CreateTupleAssembler<T>();
+            }
+            else
+            {
+                _assembler = ObjectAssemblerHelper.CreateObjectAssembler<T>();
+            }
         }
-    }    
+    }
 
     internal static class ObjectAssemblerHelper
     {
@@ -103,29 +86,31 @@ namespace POCO_Demo
             return list.Union(new[] { exp });
         }
 
-        public static MethodInfo GetMethod(Type propertyType)
+        public static MethodInfo GetMethod(Type propertyType, string methodSuffix)
         {
             bool nullable = IsNullable(propertyType);
+            if (!methodSuffix.StartsWith("By"))
+                methodSuffix = "By" + methodSuffix;
 
             if (nullable)
                 propertyType = Nullable.GetUnderlyingType(propertyType);
 
             if (propertyType == typeof(string))
             {
-                return typeof(ObjectAssemblerHelper).GetMethod("GetString");
+                return typeof(ObjectAssemblerHelper).GetMethod("GetString" + methodSuffix);
             }
 
             if (!nullable && propertyType == typeof(DateTime))
             {
-                return typeof(ObjectAssemblerHelper).GetMethod("GetDateTime");
+                return typeof(ObjectAssemblerHelper).GetMethod("GetDateTime" + methodSuffix);
             }
 
             if (propertyType.IsValueType)
             {
                 if (nullable)
-                    return typeof(ObjectAssemblerHelper).GetMethod("GetNullablePrimitive").MakeGenericMethod(propertyType);
+                    return typeof(ObjectAssemblerHelper).GetMethod("GetNullablePrimitive" + methodSuffix).MakeGenericMethod(propertyType);
 
-                return typeof(ObjectAssemblerHelper).GetMethod("GetPrimitive").MakeGenericMethod(propertyType);
+                return typeof(ObjectAssemblerHelper).GetMethod("GetPrimitive" + methodSuffix).MakeGenericMethod(propertyType);
             }
 
             throw new ArgumentException();
@@ -138,24 +123,39 @@ namespace POCO_Demo
               (typeof(Nullable<>)));
         }
 
-        public static T GetPrimitive<T>(SqlDataReader dr, string name) where T : struct
+        public static T GetPrimitiveByName<T>(SqlDataReader dr, string name) where T : struct
         {
             int ordinal = dr.GetOrdinal(name);
+            return GetPrimitiveByOrdinal<T>(dr, ordinal);
+        }
+
+        public static T GetPrimitiveByOrdinal<T>(SqlDataReader dr, int ordinal) where T : struct
+        {
             if (dr.IsDBNull(ordinal))
                 return default(T);
 
             return (T)dr.GetValue(ordinal);
         }
 
-        public static T? GetNullablePrimitive<T>(SqlDataReader dr, string name) where T : struct
+        public static T? GetNullablePrimitiveByName<T>(SqlDataReader dr, string name) where T : struct
         {
             int ordinal = dr.GetOrdinal(name);
+            return GetNullablePrimitiveByOrdinal<T>(dr, ordinal);
+        }
+
+        public static T? GetNullablePrimitiveByOrdinal<T>(SqlDataReader dr, int ordinal) where T : struct
+        {
             return dr.GetValue(ordinal) as Nullable<T>;
         }
 
-        public static string GetString(SqlDataReader dr, string name)
+        public static string GetStringByName(SqlDataReader dr, string name)
         {
             int ordinal = dr.GetOrdinal(name);
+            return GetStringByOrdinal(dr, ordinal);
+        }
+
+        public static string GetStringByOrdinal(SqlDataReader dr, int ordinal)
+        {
             if (dr.IsDBNull(ordinal))
                 return string.Empty;
 
@@ -163,13 +163,70 @@ namespace POCO_Demo
         }
 
         private static readonly DateTime DefaultDateTime = new DateTime(1800, 1, 1);
-        public static DateTime GetDateTime(SqlDataReader dr, string name)
+        public static DateTime GetDateTimeByName(SqlDataReader dr, string name)
         {
             int ordinal = dr.GetOrdinal(name);
+            return GetDateTimeByOrdinal(dr, ordinal);
+        }
+
+        public static DateTime GetDateTimeByOrdinal(SqlDataReader dr, int ordinal)
+        {
             if (dr.IsDBNull(ordinal))
                 return DefaultDateTime;
 
             return (DateTime)dr.GetValue(ordinal);
+        }
+
+        public static Func<SqlDataReader, T> CreateObjectAssembler<T>()
+        {
+            var type = typeof(T);
+            var props = type.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.SetProperty);
+
+            var dr = Expression.Parameter(typeof(SqlDataReader), "dr");
+            var itm = Expression.Parameter(type, "itm");
+
+            Expression body = Expression.Block(
+                                    new[] { itm },
+                                    Expression.Assign(itm, Expression.New(type))
+                                    .Union(props.Where(_ => _.CanWrite && !_.GetSetMethod(true).IsPrivate)
+                                                .Select((prop, index) =>
+                                                {
+                                                    var name = prop.Name;
+                                                    var ptype = prop.PropertyType;
+
+                                                    var method = ObjectAssemblerHelper.GetMethod(ptype, "Name");
+
+                                                    return Expression.Assign(
+                                                        Expression.Property(itm, name),
+                                                        Expression.Call(null, method, dr,
+                                                        Expression.Constant(name)));
+                                                }))
+                                    .Union(itm));
+
+            return Expression.Lambda<Func<SqlDataReader, T>>(body, new[] { dr }).Compile();
+        }
+
+        public static Func<SqlDataReader, T> CreateScalarAssembler<T>()
+        {
+            return _ => (T)_[0];
+        }
+
+        public static Func<SqlDataReader, T> CreateTupleAssembler<T>()
+        {
+            var type = typeof(T);
+            var props = type.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.SetProperty);
+
+            var dr = Expression.Parameter(typeof(SqlDataReader), "dr");
+
+            Expression body = Expression.New(type.GetConstructors()[0], type.GetGenericArguments().Select((t, index) =>
+                {
+                    var method = ObjectAssemblerHelper.GetMethod(t, "Ordinal");
+
+                    return Expression.Call(null, method, dr, Expression.Constant(index));
+                }).ToArray()
+            );
+
+            return Expression.Lambda<Func<SqlDataReader, T>>(body, new[] { dr }).Compile();
         }
     }
 }

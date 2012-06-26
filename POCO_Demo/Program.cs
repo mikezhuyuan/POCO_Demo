@@ -13,10 +13,30 @@ namespace POCO_Demo
 
         static void Main(string[] args)
         {
-            var assignment = GetPOCO(); //GetFromSO, GetPOCO
+            var assignment = GetTuple(); //GetFromSO, GetPOCO, GetScalar, GetTuple
 
             Console.WriteLine(assignment);            
             Console.ReadLine();
+        }
+
+        static int GetScalar()
+        {
+            using (var cmd = new Assignment_Load_p())
+            {
+                cmd.Parameters.Assignment_id = 2;
+
+                return ObjectAssembler<int>.Create(Config, cmd);
+            }
+        }
+
+        static Tuple<int, string> GetTuple()
+        {
+            using (var cmd = new Assignment_Load_p())
+            {
+                cmd.Parameters.Assignment_id = 2;
+
+                return ObjectAssembler<Tuple<int,string>>.Create(Config, cmd);
+            }
         }
 
         static Assignment GetPOCO()
