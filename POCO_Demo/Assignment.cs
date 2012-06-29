@@ -9,22 +9,13 @@ namespace POCO_Demo
     {
         public int Assignment_id { get; internal set; }
         public string Title { get; internal set; }
-        public AssignmentType AssignmentType { get; private set; }
+        public int Parent_id { get; internal set; }
+        public AssignmentType AssignmentType { get; internal set; }
 
         public override string ToString()
         {
-            return string.Format("#{0}.{1}: {2}", Assignment_id, AssignmentType, Title);
+            return string.Format("#{0}.{1}: {2} -> {3}", Assignment_id, AssignmentType, Title, Parent_id);
         }
-
-        #region Non-Public
-        internal string AssignmentTypeCode
-        {
-            set
-            {
-                AssignmentType = (AssignmentType)Enum.Parse(typeof(AssignmentType), value);
-            }
-        }
-        #endregion
     }
 
     public enum AssignmentType

@@ -7,25 +7,35 @@ using EF.Frameworks.Common.DataEF.SqlClientEF;
 
 namespace POCO_Demo
 {
+    class MyFactory : ObjectAssemblerFactory
+    {
+        protected override void OnMapping(MappingBuilder builder)
+        {
+            builder.Entity<Assignment>()
+                   .PropertyName(_ => _.Parent_id, "ParentAssignment_id")
+                   .PropertyValue(_ => _.AssignmentType, "AssignmentTypeCode", (string code) => (AssignmentType)Enum.Parse(typeof(AssignmentType), code));
+        }
+    }
+
     class Program
     {
         static IConfigurationContext Config = new ConfigurationContext("EFSchools.Englishtown.ELab.Admin.Services.*");
-
+        static ObjectAssemblerFactory factory = new MyFactory();
         static void Main(string[] args)
         {
-            var assignment = GetTuple(); //GetFromSO, GetPOCO, GetScalar, GetTuple
-
+            var assignment = GetPOCO2(); //GetFromSO, GetPOCO, GetScalar, GetTuple, GetPOCO2
+            
             Console.WriteLine(assignment);            
             Console.ReadLine();
         }
 
         static int GetScalar()
-        {
+        {            
             using (var cmd = new Assignment_Load_p())
             {
                 cmd.Parameters.Assignment_id = 2;
 
-                return ObjectAssembler<int>.Create(Config, cmd);
+                return factory.Get<int>().Create(Config, cmd);
             }
         }
 
@@ -35,7 +45,7 @@ namespace POCO_Demo
             {
                 cmd.Parameters.Assignment_id = 2;
 
-                return ObjectAssembler<Tuple<int,string>>.Create(Config, cmd);
+                return factory.Get<Tuple<int, string>>().Create(Config, cmd);
             }
         }
 
@@ -43,9 +53,19 @@ namespace POCO_Demo
         {
             using (var cmd = new Assignment_Load_p())
             {
-                cmd.Parameters.Assignment_id = 2;
+                cmd.Parameters.Assignment_id = 100;
 
-                return ObjectAssembler<Assignment>.Create(Config, cmd);
+                return factory.Get<Assignment>().Create(Config, cmd);
+            }
+        }
+
+        static Assignment2 GetPOCO2()
+        {
+            using (var cmd = new Assignment_Load_p())
+            {
+                cmd.Parameters.Assignment_id = 100;
+
+                return factory.Get<Assignment2>().Create(Config, cmd);
             }
         }
 
@@ -75,9 +95,18 @@ namespace POCO_Demo
             return new Assignment
             {
                 Assignment_id = ainfo.Assignment_id,
-                Title = ainfo.Title,
-                AssignmentTypeCode = ainfo.AssignmentTypeCode,
+                Title = ainfo.Title,                
             };
+        }
+
+        public class Assignment2
+        {
+            public int Assignment_id { get; set; }
+
+            public override string ToString()
+            {
+                return Assignment_id.ToString();
+            }
         }
     }
 }
