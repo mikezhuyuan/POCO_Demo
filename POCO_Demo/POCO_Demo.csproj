@@ -53,15 +53,19 @@
     <Compile Include="Assignment.cs" />
     <Compile Include="AssignmentInfo.simple.cs" />
     <Compile Include="Assignment_Load_p.command.cs" />
+    <Compile Include="InvalidDataCastException.cs" />
     <Compile Include="IObjectAssembler.cs" />
+    <Compile Include="IObjectAssemblerManager.cs" />
     <Compile Include="MappingBuilder.cs" />
     <Compile Include="EntityMapBuilder.cs" />
     <Compile Include="ExpressionHelper.cs" />
     <Compile Include="ObjectAssembler.cs" />
-    <Compile Include="ObjectAssemblerFactory.cs" />
     <Compile Include="ObjectAssemblerHelper.cs" />
+    <Compile Include="ObjectAssemblerManager.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="TypeCache.cs" />
+    <Compile Include="TypeHelper.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="AssignmentInfo.simple" />

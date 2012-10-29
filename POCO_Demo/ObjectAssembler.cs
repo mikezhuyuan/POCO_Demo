@@ -1,17 +1,65 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
-using System.Reflection;
-using System.Data.SqlClient;
-using EF.Frameworks.Common.ConfigurationEF;
-using EF.Frameworks.Common.DataEF.SqlClientEF;
+using System.Data;
 
 namespace POCO_Demo
 {
     internal class ObjectAssembler<T> : IObjectAssembler<T>
     {
-        public T Create(SqlDataReader dr)
+        public T Create(IDataReader dr)
+        {
+            int[] ords = null;
+
+            if (dr.Read())
+            {
+                if (ords == null)
+                    ords = _getOrdinals(dr);
+
+                return _assembler(dr, ords);
+            }
+
+            return default(T);
+        }
+
+        public IEnumerable<T> CreateList(IDataReader dr)
+        {
+            var lst = new List<T>();
+            int[] ords = null;
+
+            while (dr.Read())
+            {
+                if (ords == null)
+                    ords = _getOrdinals(dr);
+
+                var itm = _assembler(dr, ords);
+                lst.Add(itm);
+            }
+
+            return lst;
+        }
+
+        private readonly Func<IDataReader, int[], T> _assembler;
+        private readonly Func<IDataReader, int[]> _getOrdinals;
+
+        public ObjectAssembler(Dictionary<string, string> columnNameMap, Dictionary<string, Delegate> columnValueMap, List<string> ignoredProperties, Delegate creator)
+        {
+            if (columnNameMap == null)
+                columnNameMap = new Dictionary<string, string>();
+
+            if (columnValueMap == null)
+                columnValueMap = new Dictionary<string, Delegate>();
+
+            if (ignoredProperties == null)
+                ignoredProperties = new List<string>();
+
+            _getOrdinals = ObjectAssemblerHelper.CreateGetOrdinals<T>(columnNameMap, columnValueMap, ignoredProperties);
+            _assembler = ObjectAssemblerHelper.CreateObjectAssembler<T>(columnNameMap, columnValueMap, ignoredProperties, creator);
+        }
+    }
+
+    internal abstract class DefaultAssembler<T> : IObjectAssembler<T>
+    {
+        public T Create(IDataReader dr)
         {
             if (dr.Read())
                 return _assembler(dr);
@@ -19,16 +67,7 @@ namespace POCO_Demo
             return default(T);
         }
 
-        public T Create(IConfigurationContext config, IEFSqlCommand cmd)
-        {
-            using (var sm = new SqlConnectionManager())
-            using (var dr = sm.ExecuteReader(cmd, config))
-            {
-                return Create(dr);
-            }
-        }
-
-        public IEnumerable<T> CreateList(SqlDataReader dr)
+        public IEnumerable<T> CreateList(IDataReader dr)
         {
             var lst = new List<T>();
 
@@ -41,32 +80,22 @@ namespace POCO_Demo
             return lst;
         }
 
-        public IEnumerable<T> CreateList(IConfigurationContext config, IEFSqlCommand cmd)
+        protected Func<IDataReader, T> _assembler;
+    }
+
+    internal class ScalarAssembler<T> : DefaultAssembler<T>
+    {
+        public ScalarAssembler()
         {
-            using (var sm = new SqlConnectionManager())
-            using (var dr = sm.ExecuteReader(cmd, config))
-            {
-                return CreateList(dr);
-            }
+            _assembler = ObjectAssemblerHelper.CreateScalarAssembler<T>();
         }
+    }
 
-        private readonly Func<SqlDataReader, T> _assembler;
-
-        public ObjectAssembler(Dictionary<string, string> columnNameMap, Dictionary<string, Delegate> columnValueMap, List<string> ignoredProperties)
+    internal class TupleAssembler<T> : DefaultAssembler<T>
+    {
+        public TupleAssembler()
         {
-            var type = typeof(T);
-            if (type.IsPrimitive)
-            {
-                _assembler = ObjectAssemblerHelper.CreateScalarAssembler<T>();
-            }
-            else if (type.IsGenericType && type.Name.StartsWith("Tuple`"))
-            {
-                _assembler = ObjectAssemblerHelper.CreateTupleAssembler<T>();
-            }
-            else
-            {
-                _assembler = ObjectAssemblerHelper.CreateObjectAssembler<T>(columnNameMap, columnValueMap, ignoredProperties);
-            }
+            _assembler = ObjectAssemblerHelper.CreateTupleAssembler<T>();
         }
     }
 }

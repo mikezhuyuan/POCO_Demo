@@ -1,12 +1,10 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.Data;
 using System.Linq.Expressions;
 
 namespace POCO_Demo
 {
-    public class EntityMapBuilder<TEntity> where TEntity : class, new()
+    public class EntityMapBuilder<TEntity> where TEntity : class
     {
         public EntityMapBuilder(MappingBuilder mappingBuilder)
         {
@@ -37,6 +35,18 @@ namespace POCO_Demo
             return this;
         }
 
-        private MappingBuilder _mappingBuilder;
+        public EntityMapBuilder<TEntity> Create(Func<IDataReader, TEntity> creator)
+        {
+            _mappingBuilder.Create<TEntity>(creator);
+
+            return this;
+        }
+
+        public EntityMapBuilder<TEntity> Create(Func<TEntity> creator)
+        {
+            return Create(_ => creator());
+        }
+
+        private readonly MappingBuilder _mappingBuilder;
     }
 }

@@ -1,45 +1,38 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Data.SqlClient;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Data;
 
 namespace POCO_Demo
 {
     internal static class ObjectAssemblerHelper
     {
-        public static IEnumerable<Expression> Union(this Expression exp, IEnumerable<Expression> list)
+        public static IEnumerable<Expression> Union(params object[] objs)
         {
-            return new[] { exp }.Union(list);
-        }
+            IEnumerable<Expression> result = new Expression[0];
+            foreach (var obj in objs)
+            {
+                if (obj is Expression)
+                    result = result.Union(new[] { (Expression)obj });
+                else if (obj is IEnumerable<Expression>)
+                    result = result.Union((IEnumerable<Expression>)obj);
+            }
 
-        public static IEnumerable<Expression> Union(this IEnumerable<Expression> list, Expression exp)
-        {
-            return list.Union(new[] { exp });
+            return result;
         }
 
         public static MethodInfo GetMethod(Type propertyType, string methodSuffix)
         {
-            bool nullable = IsNullable(propertyType);
+            bool nullable = TypeHelper.IsNullable(propertyType);
             if (!methodSuffix.StartsWith("By"))
                 methodSuffix = "By" + methodSuffix;
 
             if (nullable)
                 propertyType = Nullable.GetUnderlyingType(propertyType);
 
-            if (propertyType == typeof(string))
-            {
-                return typeof(ObjectAssemblerHelper).GetMethod("GetString" + methodSuffix);
-            }
-
-            if (!nullable && propertyType == typeof(DateTime))
-            {
-                return typeof(ObjectAssemblerHelper).GetMethod("GetDateTime" + methodSuffix);
-            }
-
-            if (propertyType.IsValueType)
+            if (TypeHelper.IsSqlSupportedType(propertyType))
             {
                 if (nullable)
                     return typeof(ObjectAssemblerHelper).GetMethod("GetNullablePrimitive" + methodSuffix).MakeGenericMethod(propertyType);
@@ -47,144 +40,162 @@ namespace POCO_Demo
                 return typeof(ObjectAssemblerHelper).GetMethod("GetPrimitive" + methodSuffix).MakeGenericMethod(propertyType);
             }
 
-            throw new ArgumentException();
+            throw new ArgumentException("Type is not supported: " + propertyType + ". Method suffix: " + methodSuffix);
         }
 
-        private static bool IsNullable(Type type)
-        {
-            return (type.IsGenericType && type.
-              GetGenericTypeDefinition().Equals
-              (typeof(Nullable<>)));
-        }
-
-        public static T GetPrimitiveByName<T>(SqlDataReader dr, string name) where T : struct
+        public static T GetPrimitiveByName<T>(IDataReader dr, string name)
         {
             int ordinal = dr.GetOrdinal(name);
-            return GetPrimitiveByOrdinal<T>(dr, ordinal);
+
+            try
+            {
+                return GetPrimitiveByOrdinal<T>(dr, ordinal);
+            }
+            catch (InvalidDataCastException ex)
+            {
+                ex.ColumnName = name;
+                throw ex;
+            }
         }
 
-        public static T GetPrimitiveByOrdinal<T>(SqlDataReader dr, int ordinal) where T : struct
+        public static T GetPrimitiveByOrdinal<T>(IDataReader dr, int ordinal)
         {
             if (dr.IsDBNull(ordinal))
                 return default(T);
 
-            return (T)dr.GetValue(ordinal);
+            var data = dr.GetValue(ordinal);
+
+            try
+            {
+                return (T)data;
+            }
+            catch (InvalidCastException ex)
+            {
+                throw new InvalidDataCastException(data.GetType(), TypeCache<T>.Type, ex) { ColumnOrdinal = ordinal };
+            }
         }
 
-        public static T? GetNullablePrimitiveByName<T>(SqlDataReader dr, string name) where T : struct
+        //todo: check if need InvalidDataCastException
+        public static T? GetNullablePrimitiveByName<T>(IDataReader dr, string name) where T : struct
         {
             int ordinal = dr.GetOrdinal(name);
+
             return GetNullablePrimitiveByOrdinal<T>(dr, ordinal);
         }
 
-        public static T? GetNullablePrimitiveByOrdinal<T>(SqlDataReader dr, int ordinal) where T : struct
+        public static T? GetNullablePrimitiveByOrdinal<T>(IDataReader dr, int ordinal) where T : struct
         {
             return dr.GetValue(ordinal) as Nullable<T>;
         }
 
-        public static string GetStringByName(SqlDataReader dr, string name)
+        public static Func<IDataReader, int[]> CreateGetOrdinals<T>(Dictionary<string, string> columnNameMap, Dictionary<string, Delegate> columnValueMap, List<string> ignoredProperties)
         {
-            int ordinal = dr.GetOrdinal(name);
-            return GetStringByOrdinal(dr, ordinal);
+            var type = TypeCache<T>.Type;
+            var props = GetPropertiesToAssemble(ignoredProperties, type);
+            var dr = Expression.Parameter(TypeCache<IDataReader>.Type, "dr");
+            var getOrdinal = typeof(IDataRecord).GetMethod("GetOrdinal");
+            var ords = props.Select((prop, index) => Expression.Variable(typeof(int), "ord" + index)).ToArray();
+
+            Expression body = Expression.Block(
+                ords,
+                Union(
+                    ords.Select((ord, index) =>
+                        Expression.Assign(ord,
+                            Expression.Call(dr, getOrdinal,
+                                Expression.Constant(GetColumnName(columnNameMap, props[index].Name))))),
+                    NewArrayExpression.NewArrayInit(typeof(int), ords)
+                ));
+
+            return Expression.Lambda<Func<IDataReader, int[]>>(body, new[] { dr }).Compile();
         }
 
-        public static string GetStringByOrdinal(SqlDataReader dr, int ordinal)
+        public static Func<IDataReader, int[], T> CreateObjectAssembler<T>(Dictionary<string, string> columnNameMap, Dictionary<string, Delegate> columnValueMap, List<string> ignoredProperties, Delegate creator)
         {
-            if (dr.IsDBNull(ordinal))
-                return string.Empty;
-
-            return ((string)dr.GetValue(ordinal)).TrimEnd(' ');
-        }
-
-        private static readonly DateTime DefaultDateTime = new DateTime(1800, 1, 1);
-        public static DateTime GetDateTimeByName(SqlDataReader dr, string name)
-        {
-            int ordinal = dr.GetOrdinal(name);
-            return GetDateTimeByOrdinal(dr, ordinal);
-        }
-
-        public static DateTime GetDateTimeByOrdinal(SqlDataReader dr, int ordinal)
-        {
-            if (dr.IsDBNull(ordinal))
-                return DefaultDateTime;
-
-            return (DateTime)dr.GetValue(ordinal);
-        }
-
-        public static Func<SqlDataReader, T> CreateObjectAssembler<T>(Dictionary<string, string> columnNameMap, Dictionary<string, Delegate> columnValueMap, List<string> ignoredProperties)
-        {
-            if (columnNameMap == null)
-                columnNameMap = new Dictionary<string, string>();
-
-            if (columnValueMap == null)
-                columnValueMap = new Dictionary<string, Delegate>();
-
-            if (ignoredProperties == null)
-                ignoredProperties = new List<string>();
-
-            var type = typeof(T);
-            var props = type.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.SetProperty);
-
-            var dr = Expression.Parameter(typeof(SqlDataReader), "dr");
+            var type = TypeCache<T>.Type;
+            var props = GetPropertiesToAssemble(ignoredProperties, type);
+            var dr = Expression.Parameter(TypeCache<IDataReader>.Type, "dr");
+            var ords = Expression.Parameter(typeof(int[]), "ords");
             var itm = Expression.Parameter(type, "itm");
 
             Expression body = Expression.Block(
-                                    new[] { itm },
-                                    Expression.Assign(itm, Expression.New(type))
-                                    .Union(props.Where(_ => _.CanWrite && !_.GetSetMethod(true).IsPrivate && !ignoredProperties.Contains(_.Name))
-                                                .Select((prop, index) =>
-                                                {
-                                                    var name = prop.Name;
-                                                    string col = null;
-                                                    var ptype = prop.PropertyType;
+                new[] { itm },
+                Union(
+                creator == null ? Expression.Assign(itm, Expression.New(type)) : Expression.Assign(itm, Expression.Call(creator.Target == null ? null : Expression.Constant(creator.Target), creator.Method, dr)),
+                    props.Select((prop, index) =>
+                    {
+                        var name = prop.Name;
+                        var ptype = prop.PropertyType;
 
-                                                    if (!columnNameMap.TryGetValue(name, out col))
-                                                        col = name;
+                        Expression getValueExp;
+                        
+                        if (columnValueMap.ContainsKey(name))
+                        {
+                            var getValue = columnValueMap[name].Method;
+                            var method = ObjectAssemblerHelper.GetMethod(getValue.GetParameters()[0].ParameterType, "Ordinal");
+                            getValueExp = Expression.Call(null, getValue,
+                                            Expression.Call(null, method, dr,
+                                                Expression.ArrayAccess(ords, Expression.Constant(index))));
+                        }
+                        else
+                        {
+                            var method = ObjectAssemblerHelper.GetMethod(ptype, "Ordinal");
+                            getValueExp = Expression.Call(null, method, dr, Expression.ArrayAccess(ords, Expression.Constant(index)));
+                        }
 
-                                                    Expression getValueExp;
+                        return Expression.Assign(Expression.Property(itm, name), getValueExp);
+                    }),
+                    itm));
 
-                                                    if (columnValueMap.ContainsKey(name))
-                                                    {
-                                                        var getValue = columnValueMap[name].Method;
-                                                        var method = ObjectAssemblerHelper.GetMethod(getValue.GetParameters()[0].ParameterType, "Name");
-                                                        getValueExp = Expression.Call(null, getValue, Expression.Call(null, method, dr, Expression.Constant(col)));
-                                                    }
-                                                    else
-                                                    {
-                                                        var method = ObjectAssemblerHelper.GetMethod(ptype, "Name");
-                                                        getValueExp = Expression.Call(null, method, dr, Expression.Constant(col));
-                                                    }
-
-                                                    return Expression.Assign(
-                                                        Expression.Property(itm, name),
-                                                        getValueExp);
-                                                }))
-                                    .Union(itm));
-
-            return Expression.Lambda<Func<SqlDataReader, T>>(body, new[] { dr }).Compile();
+            return Expression.Lambda<Func<IDataReader, int[], T>>(body, new[] { dr, ords }).Compile();
         }
 
-        public static Func<SqlDataReader, T> CreateScalarAssembler<T>()
+        public static Func<IDataReader, T> CreateScalarAssembler<T>()
         {
-            return _ => (T)_[0];
+            return _ =>
+            {
+                var data = _[0];
+                try
+                {
+                    return (T)data;
+                }
+                catch (InvalidCastException ex)
+                {
+                    throw new InvalidDataCastException(data.GetType(), typeof(T), ex) { ColumnOrdinal = 0 };
+                }
+            };
         }
 
-        public static Func<SqlDataReader, T> CreateTupleAssembler<T>()
+        public static Func<IDataReader, T> CreateTupleAssembler<T>()
         {
-            var type = typeof(T);
-            var props = type.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.SetProperty);
-
-            var dr = Expression.Parameter(typeof(SqlDataReader), "dr");
+            var type = TypeCache<T>.Type;
+            var dr = Expression.Parameter(TypeCache<IDataReader>.Type, "dr");
 
             Expression body = Expression.New(type.GetConstructors()[0], type.GetGenericArguments().Select((t, index) =>
             {
                 var method = ObjectAssemblerHelper.GetMethod(t, "Ordinal");
 
                 return Expression.Call(null, method, dr, Expression.Constant(index));
-            }).ToArray()
-            );
+            }).ToArray());
 
-            return Expression.Lambda<Func<SqlDataReader, T>>(body, new[] { dr }).Compile();
+            return Expression.Lambda<Func<IDataReader, T>>(body, new[] { dr }).Compile();
+        }
+
+        private static PropertyInfo[] GetPropertiesToAssemble(List<string> ignoredProperties, Type type)
+        {
+            var props = type.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.SetProperty)
+                            .Where(_ => _.CanWrite && !_.GetSetMethod(true).IsPrivate && !ignoredProperties.Contains(_.Name))
+                            .ToArray();
+
+            return props;
+        }
+
+        private static string GetColumnName(Dictionary<string, string> columnNameMap, string propName)
+        {
+            string col = null;
+            if (!columnNameMap.TryGetValue(propName, out col))
+                col = propName;
+
+            return col;
         }
     }
 }

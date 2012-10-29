@@ -1,20 +1,19 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.Data;
 
 namespace POCO_Demo
 {
     public class MappingBuilder
     {
-        public EntityMapBuilder<T> Entity<T>() where T : class, new()
+        public EntityMapBuilder<T> Entity<T>() where T : class
         {
-            var type = typeof(T);
-            if (!_propertyNameMaps.ContainsKey(type))
-                _propertyNameMaps[type] = new Dictionary<string, string>();
+            var type = TypeCache<T>.Type;
+            if (!_propertyNameMap.ContainsKey(type))
+                _propertyNameMap[type] = new Dictionary<string, string>();
 
-            if (!_propertyValueMaps.ContainsKey(type))
-                _propertyValueMaps[type] = new Dictionary<string, Delegate>();
+            if (!_propertyValueMap.ContainsKey(type))
+                _propertyValueMap[type] = new Dictionary<string, Delegate>();
 
             if (!_ignoredPropertiesMap.ContainsKey(type))
                 _ignoredPropertiesMap[type] = new List<string>();
@@ -22,52 +21,59 @@ namespace POCO_Demo
             return new EntityMapBuilder<T>(this);
         }
 
+        public void Create<T>(Func<IDataReader, T> creator)
+        {
+            var type = TypeCache<T>.Type;
+
+            _creatorMap[type] = creator;
+        }
+
         public void MapPropertyName<T>(string propertyName, string columnName)
         {
-            var type = typeof(T);
+            var type = TypeCache<T>.Type;
 
-            _propertyNameMaps[type][propertyName] = columnName;
+            _propertyNameMap[type][propertyName] = columnName;
         }
 
         public void MapPropertyValue<T>(string propertyName, Delegate exec)
         {
-            var type = typeof(T);
+            var type = TypeCache<T>.Type;
 
-            _propertyValueMaps[type][propertyName] = exec;
+            _propertyValueMap[type][propertyName] = exec;
         }
 
         public void IgnoreProperty<T>(string propertyName)
         {
-            var type = typeof(T);
+            var type = TypeCache<T>.Type;
 
             _ignoredPropertiesMap[type].Add(propertyName);
         }
 
         public Dictionary<string, string> GetPropertyNameMap<T>()
         {
-            var type = typeof(T);
+            var type = TypeCache<T>.Type;
 
             Dictionary<string, string> result = null;
 
-            _propertyNameMaps.TryGetValue(type, out result);
+            _propertyNameMap.TryGetValue(type, out result);
 
             return result;
         }
 
         public Dictionary<string, Delegate> GetPropertyValueMap<T>()
         {
-            var type = typeof(T);
+            var type = TypeCache<T>.Type;
 
             Dictionary<string, Delegate> result = null;
 
-            _propertyValueMaps.TryGetValue(type, out result);
+            _propertyValueMap.TryGetValue(type, out result);
 
             return result;
         }
 
         public List<string> GetIgnoredProperties<T>()
         {
-            var type = typeof(T);
+            var type = TypeCache<T>.Type;
 
             List<string> result = null;
 
@@ -76,8 +82,20 @@ namespace POCO_Demo
             return result;
         }
 
-        private readonly Dictionary<Type, Dictionary<string, string>> _propertyNameMaps = new Dictionary<Type, Dictionary<string, string>>();
-        private readonly Dictionary<Type, Dictionary<string, Delegate>> _propertyValueMaps = new Dictionary<Type, Dictionary<string, Delegate>>();
+        public Delegate GetCreator<T>()
+        {
+            var type = TypeCache<T>.Type;
+
+            Delegate result = null;
+
+            _creatorMap.TryGetValue(type, out result);
+
+            return result;
+        }
+
+        private readonly Dictionary<Type, Delegate> _creatorMap = new Dictionary<Type, Delegate>();
+        private readonly Dictionary<Type, Dictionary<string, string>> _propertyNameMap = new Dictionary<Type, Dictionary<string, string>>();
+        private readonly Dictionary<Type, Dictionary<string, Delegate>> _propertyValueMap = new Dictionary<Type, Dictionary<string, Delegate>>();
         private readonly Dictionary<Type, List<string>> _ignoredPropertiesMap = new Dictionary<Type, List<string>>();
     }
 }

@@ -7,8 +7,14 @@ using System.Linq.Expressions;
 
 namespace POCO_Demo
 {
-    static class ExpressionHelper
+    public static class ExpressionHelper
     {
+        public static string GetMethodName(LambdaExpression expression)
+        {
+            return (((((expression.Body as UnaryExpression).Operand as MethodCallExpression).Arguments.Last()) as
+                 ConstantExpression).Value as MethodInfo).Name;
+        }
+
         public static PropertyInfo GetPropertyInfo(LambdaExpression expr)
         {
             return (PropertyInfo)((MemberExpression)expr.Body).Member;
@@ -19,5 +25,4 @@ namespace POCO_Demo
             return GetPropertyInfo(expr).Name;
         }
     }
-   
 }
